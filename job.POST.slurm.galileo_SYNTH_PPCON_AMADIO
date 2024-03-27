@@ -1,0 +1,73 @@
+#!/bin/bash 
+
+#SBATCH --job-name=POSTproc
+#SBATCH -N1
+#SBATCH --ntasks-per-node=32
+#SBATCH --time=01:30:00
+#SBATCH --mem=300gb
+#SBATCH --account=OGS23_PRACE_IT
+#SBATCH --partition=g100_usr_prod
+
+cd $SLURM_SUBMIT_DIR
+
+. ./profile.inc
+
+module load intel/oneapi-2021--binary
+module load intelmpi/oneapi-2021--binary
+export OPA_HOME=/g100_work/OGS_prod100/OPA/V7C-prod
+export OPA_HOSTNAME=g100
+export HDF5_DIR=$OPA_HOME/HOST/$OPA_HOSTNAME
+export NETCDF4_DIR=$OPA_HOME/HOST/$OPA_HOSTNAME
+export GEOS_DIR=$OPA_HOME/HOST/$OPA_HOSTNAME
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/g100_work/OGS23_PRACE_IT/COPERNICUS/V10C/HOST/g100/lib/
+
+source /g100_work/OGS23_PRACE_IT/COPERNICUS/py_env_3.9.18/bin/activate
+export PYTHONPATH='/g100_scratch/userexternal/camadio0/PPCON/DA_SATFLOAT_ppcon/wrkdir/POSTPROC/bit.sea/'
+
+
+export ONLINE_REPO=/g100_scratch/userexternal/camadio0/PPCON/SUPERFLOAT_PPCon_202312/
+MODEL=/g100_scratch/userexternal/camadio0/PPCON/DA_SATFLOAT_ppcon/wrkdir/MODEL/
+WRKDIR=/g100_scratch/userexternal/camadio0/PPCON/DA_SATFLOAT_ppcon/wrkdir/
+
+export    MASKFILE=$MODEL/meshmask.nc
+export  KCOASTFILE=$CINECA_SCRATCH/$OPA_HOME/wrkdir/MODEL/mapser.npy
+
+date
+
+MODEL_AVEDIR=$MODEL/AVE_FREQ_1/
+      OUTDIR=$WRKDIR/POSTPROC/output/AVE_FREQ_1/
+
+mkdir -p $OUTDIR
+
+     TMP_DIR=$OUTDIR/TMP
+        TMPS=$OUTDIR/TMPS
+  CHLSUP_DIR=$OUTDIR/CHL_SUP
+
+. ./profile.inc
+
+# TODO: python timelist_generator.py -l ave*N1p.nc -i $MODEL_AVEDIR -o $OUTDIR/STAT_PROFILES/
+my_prex_or_die "mpirun -np 30 python var_aggregator.py -l ave*N1p.nc -i $MODEL_AVEDIR -d VarDescriptor_1.xml_CAR -t $TMP_DIR  -c $CHLSUP_DIR -m $MASKFILE"
+my_prex_or_die "mpirun -np 32 python aveScan.py -l ave.201*.nc -i $MODEL_AVEDIR -f N1p -a $TMP_DIR -d VarDescriptor_1.xml_CAR -o $OUTDIR -t $TMPS  -s " #
+my_prex_or_die "mpirun -np 32 python compact_profiles.py -i $OUTDIR/STAT_PROFILES/ -o $OUTDIR/STAT_PROFILES/"
+
+
+exit 0
+
+########  LOW FREQUENCY ######################################################
+
+cd $SLURM_SUBMIT_DIR
+
+MODEL_AVEDIR=$MODEL/AVE_FREQ_2/
+      OUTDIR=$WRKDIR/POSTPROC/output/AVE_FREQ_2/
+
+mkdir -p $OUTDIR
+
+     TMP_DIR=$OUTDIR/TMP
+        TMPS=$OUTDIR/TMPS
+  CHLSUP_DIR=$OUTDIR/CHL_SUP
+
+my_prex_or_die "mpirun -np 8 python var_aggregator.py -l ave.*N1p.nc -i $MODEL_AVEDIR -d VarDescriptor_2.xml -t $TMP_DIR  -c $CHLSUP_DIR -m $MASKFILE"
+my_prex_or_die "mpirun -np 8 python aveScan.py  -l ave.*nc     -i $MODEL_AVEDIR -f N1p -a $TMP_DIR -d VarDescriptor_2.xml -o $OUTDIR -t $TMPS  -s " # -p punti.dat
+
+my_prex_or_die "mpirun -np 8 python compact_profiles.py -i $OUTDIR/STAT_PROFILES/ -o $OUTDIR/STAT_PROFILES/"
+

@@ -1,0 +1,87 @@
+#!/bin/bash
+
+#SBATCH --job-name=POST
+#SBATCH -N1
+#SBATCH --ntasks-per-node=32
+#SBATCH --time=01:05:00
+#SBATCH --mem=300gb
+#SBATCH --account=OGS23_PRACE_IT
+#SBATCH --partition=g100_usr_prod
+
+cd $SLURM_SUBMIT_DIR
+
+. ./profile.inc
+
+module load intel/oneapi-2021--binary
+module load intelmpi/oneapi-2021--binary
+export OPA_HOME=/g100_work/OGS_prod100/OPA/V7C-prod
+export OPA_HOSTNAME=g100
+export HDF5_DIR=$OPA_HOME/HOST/$OPA_HOSTNAME
+export NETCDF4_DIR=$OPA_HOME/HOST/$OPA_HOSTNAME
+export GEOS_DIR=$OPA_HOME/HOST/$OPA_HOSTNAME
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/g100_work/OGS23_PRACE_IT/COPERNICUS/V10C/HOST/g100/lib/
+source /g100_work/OGS23_PRACE_IT/COPERNICUS/py_env_3.9.18/bin/activate
+export PYTHONPATH='/g100_scratch/userexternal/camadio0/PPCON/DA_SATFLOAT_ppcon/wrkdir/POSTPROC/bit.sea/'
+export ONLINE_REPO=/g100_scratch/userexternal/camadio0/PPCON/SUPERFLOAT_PPCon_202312/
+MODEL=/g100_scratch/userexternal/camadio0/PPCON/DA_SATFLOAT_ppcon/wrkdir/MODEL/
+WRKDIR=/g100_scratch/userexternal/camadio0/PPCON/DA_SATFLOAT_ppcon/wrkdir/
+
+export    MASKFILE=$MODEL/meshmask.nc
+export  KCOASTFILE=$CINECA_SCRATCH/$OPA_HOME/wrkdir/MODEL/mapser.npy
+
+date
+
+      DA_DIR=$MODEL/DA__FREQ_1/
+    BFOUTDIR=$WRKDIR/POSTPROC/output/RST_BEFORE/
+
+mkdir -p $BFOUTDIR 
+
+     TMP_DIR=$BFOUTDIR/TMP
+        TMPS=$BFOUTDIR/TMPS
+  CHLSUP_DIR=$BFOUTDIR/CHL_SUP
+
+. ./profile.inc
+
+my_prex_or_die "mpirun -np 30 python var_aggregator.py -l RSTbefore*2019*00:00*P1l.nc -i $DA_DIR -d VarDescriptor_RST_DA.xml -t $TMP_DIR  -c $CHLSUP_DIR -m $MASKFILE"
+my_prex_or_die "mpirun python aveScan.py  -l RSTbefore*2019*00:00*nc     -i $DA_DIR -f P1l -a $TMP_DIR -d VarDescriptor_RST_DA.xml -o $BFOUTDIR -t $TMPS  -s " # -p punti.dat
+my_prex_or_die "mpirun python compact_profiles.py -i $BFOUTDIR/STAT_PROFILES/ -o $BFOUTDIR/STAT_PROFILES/"
+
+exit 0
+
+ANS=$?
+# ---------- cleaning
+if [ $ANS == 0 ] ; then  
+   cd $TMPS
+   rm -f tmp.*
+   cd $SLURM_SUBMIT_DIR
+fi
+my_prex_or_die "mpirun python compact_profiles.py -i $BFOUTDIR/STAT_PROFILES/ -o $BFOUTDIR/STAT_PROFILES/"
+
+    AFOUTDIR=$REFDIR/output/DA__FREQ_1_after/
+
+     TMP_DIR=$AFOUTDIR/TMP
+        TMPS=$AFOUTDIR/TMPS
+  CHLSUP_DIR=$AFOUTDIR/CHL_SUP
+
+. ./profile.inc
+
+my_prex_or_die "mpirun python var_aggregator.py -l RST_after*12:00:00*P1l.nc -i $DA_DIR -d VarDescriptor_P_lagg.xml -t $TMP_DIR  -c $CHLSUP_DIR -m $MASKFILE"
+my_prex_or_die "mpirun python aveScan.py  -l RST_after*12:00:00*nc     -i $DA_DIR -f P1l -a $TMP_DIR -d VarDescriptor_P_lagg.xml -o $AFOUTDIR -t $TMPS  -s " # -p punti.dat
+
+ANS=$?
+# ---------- cleaning
+if [ $ANS == 0 ] ; then  
+   cd $TMPS
+   rm -f tmp.*
+   cd $SLURM_SUBMIT_DIR
+fi
+my_prex_or_die "mpirun python compact_profiles.py -i $AFOUTDIR/STAT_PROFILES/ -o $AFOUTDIR/STAT_PROFILES/"
+
+
+OUTINC=$REFDIR/output/DA__FREQ_1_INC/STAT_PROFILES/
+
+mkdir -p $OUTINC
+
+my_prex_or_die "python deltaRST_STAT_PROFILES.py -b $BFOUTDIR -a $AFOUTDIR -o $OUTINC"
+
+
